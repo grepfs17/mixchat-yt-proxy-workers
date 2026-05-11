@@ -1,0 +1,14 @@
+name = "mixchat-yt-proxy-workers"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Secrets — set via `wrangler secret put <NAME>`:
+#   AUTH_TOKEN
+#   YT_COOKIE
+#   YT_POTOKEN
+#   YT_VISITOR_DATA
+
+[vars]
+YT_CLIENT = "WEB"
+YT_DEBUG = "0"
+RATE_LIMIT_MAX = "200"

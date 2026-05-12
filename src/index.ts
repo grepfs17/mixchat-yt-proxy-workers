@@ -37,6 +37,9 @@ const COOLDOWN_AFTER_403_MS = 30_000;
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// InnerTube API keys are public — they're embedded in YouTube's client-side JS
+// and identify the client type (WEB, TV, etc.), not a user or project.
+// Same keys used by youtubei.js, yt-dlp, Invidious, etc.
 const CLIENTS: Record<string, ClientConfig> = {
   WEB: {
     clientName: "WEB",

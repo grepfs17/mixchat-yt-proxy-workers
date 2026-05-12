@@ -9,7 +9,10 @@ Same as the Vercel version (`mixchat-yt-proxy`), but running on Cloudflare Worke
 ## Tech stack
 
 - Cloudflare Workers (TypeScript)
-- Manual InnerTube context construction (no youtubei.js dependency for smaller bundle)
+- Manual InnerTube context construction (no youtubei.js dependency)
+  - **Bundle size**: Cloudflare Workers has a 10MB limit (free and paid). youtubei.js is too large to fit.
+  - **Runtime incompatibility**: Workers runs on V8, not Node.js. youtubei.js depends on Node.js APIs (crypto, JSDOM) that don't work without heavy polyfilling.
+  - **Simplicity**: The proxy only needs to construct the InnerTube `context` object and forward requests — it doesn't need a full YouTube client library.
 - Web standard APIs (Request/Response/fetch)
 
 ## Key differences from Vercel version

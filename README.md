@@ -77,7 +77,9 @@ npm run dev
 
 ## 403 handling
 
-When YouTube returns a 403, the proxy invalidates its InnerTube session (regenerates visitor data). There is a 30-second cooldown after each 403 to avoid hammering YouTube. MixChat's side also has its own cooldown.
+When YouTube returns a 403, the proxy invalidates its session (regenerates visitor data) and passes the 403 straight back to MixChat — there is no blanket cooldown that blocks all other requests, so a single flagged request never takes the whole proxy down. The next request rebuilds a fresh session immediately. After repeated 403s the env-provided visitor/PoToken pair is retired for 30 minutes and fresh visitor data is used without a PoToken, then the env pair is retried.
+
+MixChat's side also has its own cooldown.
 
 ## Security
 

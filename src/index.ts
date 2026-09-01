@@ -38,11 +38,11 @@ const COOLDOWN_AFTER_403_MS = 30_000;
 
 // Rotated per session init so a freshly generated visitor data isn't paired
 // with the same fingerprint that just got blocked.
+// Chrome desktop only — Firefox/macOS mixes under a WEB client look
+// inconsistent and are a known trigger for YouTube bot checks.
 const USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ];
 let userAgentCursor = 0;
 
@@ -51,10 +51,12 @@ const DEFAULT_USER_AGENT = USER_AGENTS[0];
 // InnerTube API keys are public — they're embedded in YouTube's client-side JS
 // and identify the client type (WEB, TV, etc.), not a user or project.
 // Same keys used by youtubei.js, yt-dlp, Invidious, etc.
+// Client versions must be current — a year-stale clientVersion is itself a
+// bot-check trigger. WEB matches the youtubei.js 17.x version MixChat sends.
 const CLIENTS: Record<string, ClientConfig> = {
   WEB: {
     clientName: "WEB",
-    clientVersion: "2.20250512.00.00",
+    clientVersion: "2.20260623.01.00",
     apiKey: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
     userAgent: DEFAULT_USER_AGENT,
   },
@@ -120,10 +122,23 @@ function encodeVarint(value: number): number[] {
   return bytes;
 }
 
+// Real YouTube visitor ids are 11 chars from the URL-safe base64 alphabet
+// (same as youtubei.js generateRandomString). A 32-char hex id, as used
+// before, is visibly anomalous and can be flagged on its own.
+const VISITOR_ID_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+function generateVisitorId(): string {
+  const bytes = new Uint8Array(11);
+  crypto.getRandomValues(bytes);
+  let id = "";
+  for (let i = 0; i < bytes.length; i++) {
+    id += VISITOR_ID_ALPHABET[bytes[i] % VISITOR_ID_ALPHABET.length];
+  }
+  return id;
+}
+
 function generateVisitorData(): string {
-  const randBytes = new Uint8Array(16);
-  crypto.getRandomValues(randBytes);
-  const id = Array.from(randBytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  const id = generateVisitorId();
 
   const idUtf8 = new TextEncoder().encode(id);
   const timestamp = Math.floor(Date.now() / 1000);
@@ -152,11 +167,18 @@ let last403Time = 0;
 // used to persist for hours. After repeated 403s we switch to freshly
 // generated visitor data and drop the (now stale, unpaired) PoToken so the
 // next session looks like a brand-new visitor.
-let blockedSessionDetected = false;
+//
+// Unlike the previous version, this is NOT permanent: the flag expires after
+// SESSION_BLOCK_RESET_MS so the env-provided pair is retried later (YouTube
+// blocks are often temporary), and there is no blanket cooldown after a 403 —
+// the next request simply rebuilds a fresh session immediately, matching the
+// Vercel proxy that keeps working.
+let blockedSessionUntil = 0;
 let recent403Count = 0;
 let last403Timestamp = 0;
 const SESSION_BLOCK_403_THRESHOLD = 2;
 const SESSION_BLOCK_WINDOW_MS = 5 * 60_000;
+const SESSION_BLOCK_RESET_MS = 30 * 60_000;
 
 function invalidateSession(): void {
   sessionState = null;
@@ -175,10 +197,12 @@ function getClientConfig(clientType: string, env: Env): ClientConfig {
 function initSession(env: Env): SessionState {
   const clientConfig = getClientConfig(env.YT_CLIENT || "WEB", env);
   // Once YouTube has flagged the env-provided credentials, reuse only makes
-  // the block worse — fall back to freshly generated visitor data.
-  const usesEnvVisitor = !blockedSessionDetected && !!env.YT_VISITOR_DATA;
+  // the block worse — fall back to freshly generated visitor data until the
+  // block window expires, then give the env pair another chance.
+  const blocked = Date.now() < blockedSessionUntil;
+  const usesEnvVisitor = !blocked && !!env.YT_VISITOR_DATA;
   const visitorData =
-    !blockedSessionDetected && env.YT_VISITOR_DATA
+    !blocked && env.YT_VISITOR_DATA
       ? env.YT_VISITOR_DATA
       : generateVisitorData();
   const debug = env.YT_DEBUG === "1";
@@ -414,7 +438,6 @@ export default {
 
       if (ytRes.status === 403) {
         invalidateSession();
-        last403Time = Date.now();
         const now = Date.now();
         if (now - last403Timestamp > SESSION_BLOCK_WINDOW_MS) {
           recent403Count = 0;
@@ -422,9 +445,13 @@ export default {
         last403Timestamp = now;
         recent403Count++;
         if (recent403Count >= SESSION_BLOCK_403_THRESHOLD) {
-          blockedSessionDetected = true;
+          // This error is not pushed to MixChat as a 503/cooldown — the
+          // response is passed through and the session rebuilds fresh (new
+          // visitor, no stale PoToken) on the very next request, so a single
+          // flagged request never takes the whole proxy down for 30s.
+          blockedSessionUntil = now + SESSION_BLOCK_RESET_MS;
           console.error(
-            "[Proxy] Repeated 403s — credentials flagged; switching to fresh visitor data without PoToken"
+            `[Proxy] Repeated 403s — credentials flagged; using fresh visitor data without PoToken for ${SESSION_BLOCK_RESET_MS / 60_000}min`
           );
         } else {
           console.error("[Proxy] YouTube returned 403 — invalidated session");

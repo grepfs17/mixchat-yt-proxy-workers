@@ -77,9 +77,11 @@ See `.env.example` for full documentation. Key ones:
 
 ## 403 handling
 
-YouTube 403 responses invalidate the session (regenerate visitor data). A 30-second cooldown prevents retry storms; requests during the cooldown get a `503 {"error":"YouTube temporarily blocked","retryAfter":30}` so MixChat's proxy failover backs off. MixChat's side also has its own cooldown in `src/lib/youtube.ts`.
+YouTube 403 responses invalidate the session. The proxy does **not** enter a blanket cooldown or serve `503` to other requests: the 403 is passed through to MixChat, and the next request immediately rebuilds a fresh session (new visitor data, no stale companion data). This mirrors the Vercel proxy, which stays up under the same conditions. MixChat's side has its own cooldown in `src/lib/youtube.ts`.
 
-After the second 403 within 5 minutes, the worker considers the env-provided `YT_VISITOR_DATA`/`YT_POTOKEN` pair blocked and stops reusing it: sessions get freshly generated visitor data, the user agent rotates, and the `?pot=` param is dropped (a PoToken is bound to its paired visitor data, so sending a stale pot with fresh data can itself trigger bot checks). This stops a flagged pair from keeping the proxy blocked for hours.
+After the second 403 within 5 minutes, the worker considers the env-provided `YT_VISITOR_DATA`/`YT_POTOKEN` pair blocked and stops reusing it for 30 minutes: sessions get freshly generated visitor data, the user agent rotates, and the `?pot=` param is dropped (a PoToken is bound to its paired visitor data, so sending a stale pot with fresh data can itself trigger bot checks). After the 30-minute window the env pair is tried again — YouTube blocks are often temporary. This stops a flagged pair from keeping the proxy blocked for hours without permanently bricking the worker.
+
+Browser-fingerprint fidelity matters: visitor data must be an 11-char URL-safe base64 id (protobuf-encoded like youtubei.js produces, not a hex string), the WEB client must use a desktop Chrome user agent (no Firefox/macOS mixes), and `CLIENT_VERSION` must stay current — YouTube bot-checks anomalous fingerprints on their own.
 
 ## Setting secrets
 

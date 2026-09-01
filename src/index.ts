@@ -28,14 +28,25 @@ interface SessionState {
   context: Record<string, any>;
   userAgent: string;
   clientConfig: ClientConfig;
+  /** Whether this session reuses the env-provided visitor data (paired with YT_POTOKEN). */
+  usesEnvVisitor: boolean;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const COOLDOWN_AFTER_403_MS = 30_000;
 
-const DEFAULT_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+// Rotated per session init so a freshly generated visitor data isn't paired
+// with the same fingerprint that just got blocked.
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+];
+let userAgentCursor = 0;
+
+const DEFAULT_USER_AGENT = USER_AGENTS[0];
 
 // InnerTube API keys are public — they're embedded in YouTube's client-side JS
 // and identify the client type (WEB, TV, etc.), not a user or project.
@@ -135,6 +146,18 @@ let sessionState: SessionState | null = null;
 let isInitializing = false;
 let last403Time = 0;
 
+// ── Block detection ────────────────────────────────────────────────────
+// YouTube can flag a (visitor data, PoToken) pair as a bot. Reusing the
+// flagged pair after a 403 just re-triggers the block, which is why blocks
+// used to persist for hours. After repeated 403s we switch to freshly
+// generated visitor data and drop the (now stale, unpaired) PoToken so the
+// next session looks like a brand-new visitor.
+let blockedSessionDetected = false;
+let recent403Count = 0;
+let last403Timestamp = 0;
+const SESSION_BLOCK_403_THRESHOLD = 2;
+const SESSION_BLOCK_WINDOW_MS = 5 * 60_000;
+
 function invalidateSession(): void {
   sessionState = null;
 }
@@ -144,12 +167,20 @@ function getClientConfig(clientType: string, env: Env): ClientConfig {
   if (ct === "TV") ct = "TVHTML5";
   if (ct === "TVHTML5_TV") ct = "TVHTML5_SIMPLY_EMBEDDED_PLAYER";
   const config = CLIENTS[ct] || CLIENTS["WEB"];
-  return { ...config, userAgent: env.YT_USER_AGENT || config.userAgent };
+  const userAgent =
+    env.YT_USER_AGENT || USER_AGENTS[userAgentCursor++ % USER_AGENTS.length];
+  return { ...config, userAgent };
 }
 
 function initSession(env: Env): SessionState {
   const clientConfig = getClientConfig(env.YT_CLIENT || "WEB", env);
-  const visitorData = env.YT_VISITOR_DATA || generateVisitorData();
+  // Once YouTube has flagged the env-provided credentials, reuse only makes
+  // the block worse — fall back to freshly generated visitor data.
+  const usesEnvVisitor = !blockedSessionDetected && !!env.YT_VISITOR_DATA;
+  const visitorData =
+    !blockedSessionDetected && env.YT_VISITOR_DATA
+      ? env.YT_VISITOR_DATA
+      : generateVisitorData();
   const debug = env.YT_DEBUG === "1";
 
   const context = {
@@ -174,7 +205,7 @@ function initSession(env: Env): SessionState {
     });
   }
 
-  return { visitorData, apiKey: clientConfig.apiKey, context, userAgent: clientConfig.userAgent, clientConfig };
+  return { visitorData, apiKey: clientConfig.apiKey, context, userAgent: clientConfig.userAgent, clientConfig, usesEnvVisitor };
 }
 
 function getSession(env: Env): SessionState {
@@ -317,7 +348,10 @@ export default {
     for (const [key, value] of url.searchParams) {
       targetUrl.searchParams.set(key, value);
     }
-    if (env.YT_POTOKEN) {
+    // PoToken is bound to its paired visitor data — sending a stale pot
+    // alongside fresh (or freshly generated) visitor data can itself trigger
+    // a bot check, so only attach it while we're using the env visitor data.
+    if (env.YT_POTOKEN && session.usesEnvVisitor) {
       targetUrl.searchParams.set("pot", env.YT_POTOKEN);
     }
 
@@ -381,7 +415,20 @@ export default {
       if (ytRes.status === 403) {
         invalidateSession();
         last403Time = Date.now();
-        console.error("[Proxy] YouTube returned 403 — invalidated session");
+        const now = Date.now();
+        if (now - last403Timestamp > SESSION_BLOCK_WINDOW_MS) {
+          recent403Count = 0;
+        }
+        last403Timestamp = now;
+        recent403Count++;
+        if (recent403Count >= SESSION_BLOCK_403_THRESHOLD) {
+          blockedSessionDetected = true;
+          console.error(
+            "[Proxy] Repeated 403s — credentials flagged; switching to fresh visitor data without PoToken"
+          );
+        } else {
+          console.error("[Proxy] YouTube returned 403 — invalidated session");
+        }
       }
 
       const origin = getOrigin(request);

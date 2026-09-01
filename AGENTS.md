@@ -77,7 +77,9 @@ See `.env.example` for full documentation. Key ones:
 
 ## 403 handling
 
-YouTube 403 responses invalidate the session (regenerate visitor data). A 30-second cooldown prevents retry storms. MixChat's side also has its own cooldown in `src/lib/youtube.ts`.
+YouTube 403 responses invalidate the session (regenerate visitor data). A 30-second cooldown prevents retry storms; requests during the cooldown get a `503 {"error":"YouTube temporarily blocked","retryAfter":30}` so MixChat's proxy failover backs off. MixChat's side also has its own cooldown in `src/lib/youtube.ts`.
+
+After the second 403 within 5 minutes, the worker considers the env-provided `YT_VISITOR_DATA`/`YT_POTOKEN` pair blocked and stops reusing it: sessions get freshly generated visitor data, the user agent rotates, and the `?pot=` param is dropped (a PoToken is bound to its paired visitor data, so sending a stale pot with fresh data can itself trigger bot checks). This stops a flagged pair from keeping the proxy blocked for hours.
 
 ## Setting secrets
 

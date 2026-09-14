@@ -286,7 +286,7 @@ function isAllowedOrigin(origin: string, env: Env): boolean {
 function corsHeaders(env: Env, origin: string): Record<string, string> {
   const allowed = env.CORS_ORIGIN || "";
   const headers: Record<string, string> = {
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-YouTube-User-Authorization",
   };
   if (allowed && isAllowedOrigin(origin, env)) {
     headers["Access-Control-Allow-Origin"] = allowed;
@@ -307,7 +307,7 @@ export default {
       const origin = getOrigin(request);
       const headers: Record<string, string> = {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-YouTube-User-Authorization",
         "Access-Control-Max-Age": "86400",
         ...corsHeaders(env, origin),
       };
@@ -389,7 +389,12 @@ export default {
     };
     if (session.apiKey) forwardHeaders["x-youtube-api-key"] = session.apiKey;
     if (session.visitorData) forwardHeaders["x-goog-visitor-id"] = session.visitorData;
-    if (env.YT_COOKIE) forwardHeaders["Cookie"] = env.YT_COOKIE;
+    const userAuthorization = request.headers.get("x-youtube-user-authorization");
+    if (userAuthorization) {
+      forwardHeaders["Authorization"] = userAuthorization;
+    } else if (env.YT_COOKIE) {
+      forwardHeaders["Cookie"] = env.YT_COOKIE;
+    }
 
     // Inject session context into POST request body
     let requestBody: string | undefined;

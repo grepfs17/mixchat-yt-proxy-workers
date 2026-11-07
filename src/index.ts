@@ -99,12 +99,13 @@ function isRateLimited(ip: string, maxRequests: number): boolean {
 
 // ── Constant-time auth comparison ───────────────────────────────────────
 function verifyToken(provided: string, expected: string): boolean {
-  if (provided.length !== expected.length) return false;
   const a = new TextEncoder().encode(provided);
   const b = new TextEncoder().encode(expected);
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    mismatch |= a[i] ^ b[i];
+  // Iterate over the expected length only so the loop count doesn't depend on
+  // the attacker-controlled input; fold the length difference into the result.
+  let mismatch = a.length ^ b.length;
+  for (let i = 0; i < b.length; i++) {
+    mismatch |= (a[i] ?? 0) ^ b[i];
   }
   return mismatch === 0;
 }
@@ -321,10 +322,15 @@ export default {
       return jsonResponse({ error: "Too many requests" }, 429, { "Retry-After": "60" });
     }
 
+    // Fail closed: without a configured token this would be an open proxy.
+    if (!env.AUTH_TOKEN) {
+      console.error("[Auth] AUTH_TOKEN is not configured — refusing all requests");
+      return jsonResponse({ error: "Proxy not configured" }, 503);
+    }
+
     // Health check
     const isHealthCheck = path === "/api/youtube" || path === "/api/youtube/" || path === "/health";
     if (isHealthCheck) {
-      if (!env.AUTH_TOKEN) return jsonResponse({ status: "ok" }, 200);
       const auth = request.headers.get("authorization");
       if (!auth) return jsonResponse({ error: "Unauthorized" }, 401);
       const token = auth.startsWith("Bearer ") ? auth.slice(7) : auth;
@@ -333,14 +339,10 @@ export default {
     }
 
     // Auth
-    if (env.AUTH_TOKEN) {
-      const auth = request.headers.get("authorization");
-      if (!auth) return jsonResponse({ error: "Missing Authorization header" }, 401);
-      const token = auth.startsWith("Bearer ") ? auth.slice(7) : auth;
-      if (!verifyToken(token, env.AUTH_TOKEN)) return jsonResponse({ error: "Invalid token" }, 401);
-    } else {
-      console.warn("[Auth] AUTH_TOKEN not set — proxy is open!");
-    }
+    const auth = request.headers.get("authorization");
+    if (!auth) return jsonResponse({ error: "Missing Authorization header" }, 401);
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : auth;
+    if (!verifyToken(token, env.AUTH_TOKEN)) return jsonResponse({ error: "Invalid token" }, 401);
 
     // Parse InnerTube path
     const match = path.match(/^\/api\/youtube\/(.+)$/);

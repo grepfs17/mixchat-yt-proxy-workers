@@ -57,7 +57,7 @@ The `context` in the body is merged with the proxy's session context (preserving
 | `YT_COOKIE` | No | — | Browser cookie string for authenticated access |
 | `YT_POTOKEN` | No | — | Manual PoToken override |
 | `YT_VISITOR_DATA` | No | — | Manual visitor data override |
-| `YT_RATE_LIMIT_MAX` | No | `200` | Max requests per minute per IP |
+| `RATE_LIMIT_MAX` | No | `200` | Max requests per minute per IP |
 
 Secrets (`AUTH_TOKEN`, `CORS_ORIGIN`, `YT_COOKIE`, `YT_POTOKEN`, `YT_VISITOR_DATA`) must be set via `wrangler secret put`.
 
@@ -83,7 +83,7 @@ Mixchat's side also has its own cooldown.
 
 ## Security
 
-- **Auth**: All requests require a Bearer token. Token comparison uses XOR-based constant-time comparison to prevent timing attacks.
+- **Auth**: All requests require a Bearer token. If `AUTH_TOKEN` is not configured the proxy refuses every request with `503` instead of running open. Token comparison uses XOR-based constant-time comparison to prevent timing attacks.
 - **CORS**: `Access-Control-Allow-Origin` is set to `CORS_ORIGIN`. If not configured, CORS headers are empty and browser requests are blocked. Server-to-server requests (from Mixchat) work regardless since they don't enforce CORS.
 - **Rate limiting**: 200 requests per minute per IP (configurable via `RATE_LIMIT_MAX`). Exceeded requests get a 429 with a `Retry-After: 60` header.
 - **Health check**: Requires auth. Does not leak service info to unauthenticated requests.

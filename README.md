@@ -4,7 +4,7 @@ A Cloudflare Worker that proxies YouTube InnerTube API requests. MixChat uses th
 
 ## How it works
 
-MixChat sends InnerTube API requests here. The proxy adds its own session context (API key, visitor data, client headers) and forwards the request to YouTube. The raw response is sent back unchanged.
+Mixchat sends InnerTube API requests here. The proxy adds its own session context (API key, visitor data, client headers) and forwards the request to YouTube. The raw response is sent back unchanged.
 
 This way MixChat's server IP never talks to YouTube directly — only Cloudflare's IPs do.
 

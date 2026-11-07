@@ -1,12 +1,12 @@
-# MixChat YouTube Proxy Workers
+# Mixchat YouTube Proxy Workers
 
-A Cloudflare Worker that proxies YouTube InnerTube API requests. MixChat uses this to route all YouTube API traffic through a separate domain, avoiding IP blocks from YouTube on the main app server.
+A Cloudflare Worker that proxies YouTube InnerTube API requests. Mixchat uses this to route all YouTube API traffic through a separate domain, avoiding IP blocks from YouTube on the main app server.
 
 ## How it works
 
 Mixchat sends InnerTube API requests here. The proxy adds its own session context (API key, visitor data, client headers) and forwards the request to YouTube. The raw response is sent back unchanged.
 
-This way MixChat's server IP never talks to YouTube directly — only Cloudflare's IPs do.
+This way Mixchat's server IP never talks to YouTube directly — only Cloudflare's IPs do.
 
 ### No youtubei.js
 
@@ -43,15 +43,15 @@ The `context` in the body is merged with the proxy's session context (preserving
 2. Set secrets: `wrangler secret put AUTH_TOKEN` (and others, see below)
 3. Configure non-secret vars in `wrangler.toml` `[vars]` or via secrets
 4. Deploy: `npm run deploy`
-5. In MixChat, set `YT_PROXY` to your Worker URL and `YT_PROXY_TOKEN` to the auth token
+5. In Mixchat, set `YT_PROXY` to your Worker URL and `YT_PROXY_TOKEN` to the auth token
 
 ## Environment variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AUTH_TOKEN` | Yes | — | Shared secret for Bearer auth. XOR-based constant-time comparison prevents timing attacks. |
-| `CORS_ORIGIN` | Yes | — | Allowed origin for CORS. Set to your MixChat URL. If empty, browser requests are blocked. |
-| `YT_CLIENT` | No | `WEB` | InnerTube client type. Must match MixChat's `YT_CLIENT` for compatible response formats. |
+| `CORS_ORIGIN` | Yes | — | Allowed origin for CORS. Set to your Mixchat URL. If empty, browser requests are blocked. |
+| `YT_CLIENT` | No | `WEB` | InnerTube client type. Must match Mixchat's `YT_CLIENT` for compatible response formats. |
 | `YT_DEBUG` | No | `0` | Set to `1` for verbose logging |
 | `YT_USER_AGENT` | No | Chrome 124 | Custom User-Agent string |
 | `YT_COOKIE` | No | — | Browser cookie string for authenticated access |
@@ -77,14 +77,14 @@ npm run dev
 
 ## 403 handling
 
-When YouTube returns a 403, the proxy invalidates its session (regenerates visitor data) and passes the 403 straight back to MixChat — there is no blanket cooldown that blocks all other requests, so a single flagged request never takes the whole proxy down. The next request rebuilds a fresh session immediately. After repeated 403s the env-provided visitor/PoToken pair is retired for 30 minutes and fresh visitor data is used without a PoToken, then the env pair is retried.
+When YouTube returns a 403, the proxy invalidates its session (regenerates visitor data) and passes the 403 straight back to Mixchat — there is no blanket cooldown that blocks all other requests, so a single flagged request never takes the whole proxy down. The next request rebuilds a fresh session immediately. After repeated 403s the env-provided visitor/PoToken pair is retired for 30 minutes and fresh visitor data is used without a PoToken, then the env pair is retried.
 
-MixChat's side also has its own cooldown.
+Mixchat's side also has its own cooldown.
 
 ## Security
 
 - **Auth**: All requests require a Bearer token. Token comparison uses XOR-based constant-time comparison to prevent timing attacks.
-- **CORS**: `Access-Control-Allow-Origin` is set to `CORS_ORIGIN`. If not configured, CORS headers are empty and browser requests are blocked. Server-to-server requests (from MixChat) work regardless since they don't enforce CORS.
+- **CORS**: `Access-Control-Allow-Origin` is set to `CORS_ORIGIN`. If not configured, CORS headers are empty and browser requests are blocked. Server-to-server requests (from Mixchat) work regardless since they don't enforce CORS.
 - **Rate limiting**: 200 requests per minute per IP (configurable via `RATE_LIMIT_MAX`). Exceeded requests get a 429 with a `Retry-After: 60` header.
 - **Health check**: Requires auth. Does not leak service info to unauthenticated requests.
 
@@ -92,4 +92,4 @@ MixChat's side also has its own cooldown.
 
 - Cloudflare Workers free plan has a 10ms CPU time limit and 30s wall time limit. Live chat long-polling may require the paid plan with extended timeouts.
 - No JSDOM/PoToken auto-generation on Workers. Set `YT_POTOKEN` and `YT_VISITOR_DATA` manually if needed.
-- Both this proxy and MixChat should use the same `YT_CLIENT` (default `WEB`) for compatible response formats.
+- Both this proxy and Mixchat should use the same `YT_CLIENT` (default `WEB`) for compatible response formats.
